@@ -1,13 +1,16 @@
 import os
 import io
 import re
+import cv2
 import pytesseract
+import numpy as np
 from PIL import Image
 import discord
 from typing import Final
 from dotenv import load_dotenv
 from discord import app_commands
 from bot import Bot
+import tempfile
 
 load_dotenv()
 TOKEN: Final[str] = os.getenv('DISCORD_TOKEN')
@@ -22,19 +25,100 @@ async def on_ready() -> None:
     print(f'{bot.user} is up and running!')
 
 
-@bot.tree.command(name="flame", description="Upload a screenshot of your equipment and get it's flame score breakdown.")
+@bot.tree.command(name="flame", description="Upload a screenshot of your equipment and get its flame score breakdown.")
 @app_commands.describe(equipment="Upload a screenshot of equipment")
 async def flame(interaction: discord.Interaction, equipment: discord.Attachment):
     if equipment.content_type.startswith('image/'):
         image_data = await equipment.read()
         img = Image.open(io.BytesIO(image_data))
+        preprocessed_images = preprocess_image(img)
 
-        text = pytesseract.image_to_string(img)
-        #flames_info = extract_flames(text)
+        # Load the binary image for Tesseract OCR
+        binary_image = cv2.imread(preprocessed_images["binary"], cv2.IMREAD_GRAYSCALE)
 
-        await interaction.response.send_message(f'used the flame command with the passed parameter: {equipment}\nText found is {text}')
+        # Use pytesseract to extract text from the preprocessed image
+        custom_config = r'--psm 6 --oem 3'
+        text = pytesseract.image_to_string(binary_image, config=custom_config)
+
+        # Send the preprocessed images and extracted text back to the user
+        await interaction.response.send_message(
+            f'Used the flame command with the passed parameter: {equipment.filename}\nText found is:\n{text}')
+        await interaction.followup.send(files=[
+            discord.File(preprocessed_images["original"], 'original_image.png'),
+            discord.File(preprocessed_images["hsv"], 'hsv_image.png'),
+            discord.File(preprocessed_images["mask"], 'mask.png'),
+            discord.File(preprocessed_images["green_text"], 'green_text.png'),
+            discord.File(preprocessed_images["gray"], 'gray_image.png'),
+            discord.File(preprocessed_images["binary"], 'binary_image.png')
+        ])
+
+        # Remove the temporary files
+        for path in preprocessed_images.values():
+            os.remove(path)
     else:
         await interaction.response.send_message("The uploaded file is not a valid image.", ephemeral=True)
+
+
+def preprocess_image(image):
+    """
+    Preprocess the image to isolate green text and visualize intermediate steps.
+    """
+    open_cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    hsv_image = cv2.cvtColor(open_cv_image, cv2.COLOR_BGR2HSV)
+
+    # Save the original and HSV images for debugging
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+        original_img_path = temp_file.name
+        cv2.imwrite(original_img_path, open_cv_image)
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+        hsv_img_path = temp_file.name
+        cv2.imwrite(hsv_img_path, hsv_image)
+
+    # Define the range for green color in HSV
+    lower_green = (40, 40, 0)
+    upper_green = (255, 255, 40)
+
+    # Create a mask for green color
+    mask = cv2.inRange(hsv_image, lower_green, upper_green)
+
+    # Save the mask for debugging
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+        mask_path = temp_file.name
+        cv2.imwrite(mask_path, mask)
+
+    # Bitwise-AND mask and original image to isolate green text
+    green_text = cv2.bitwise_and(open_cv_image, hsv_image, mask=mask)
+
+    # Save the isolated green text for debugging
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+        green_text_path = temp_file.name
+        cv2.imwrite(temp_file.name, green_text)
+
+    # Convert the masked image to grayscale
+    gray_image = cv2.cvtColor(green_text, cv2.COLOR_BGR2GRAY)
+
+    # Save the grayscale image for debugging
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+        gray_image_path = temp_file.name
+        cv2.imwrite(temp_file.name, gray_image)
+
+    # Apply thresholding to get a binary image
+    _, binary_image = cv2.threshold(gray_image, 1, 255, cv2.THRESH_BINARY)
+
+    # Save the binary image for debugging
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+        binary_image_path = temp_file.name
+        cv2.imwrite(temp_file.name, binary_image)
+
+    return {
+        "original": original_img_path,
+        "hsv": hsv_img_path,
+        "mask": mask_path,
+        "green_text": green_text_path,
+        "gray": gray_image_path,
+        "binary": binary_image_path
+    }
 
 
 def extract_flames(text: str):
