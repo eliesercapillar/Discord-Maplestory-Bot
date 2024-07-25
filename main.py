@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from discord import app_commands
 from bot import Bot
 import tempfile
+from util import get_limits
+import easyocr
 
 load_dotenv()
 TOKEN: Final[str] = os.getenv('DISCORD_TOKEN')
@@ -18,7 +20,8 @@ pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tessera
 
 # Initialize Bot
 bot = Bot()
-
+reader = easyocr.Reader(['en'])
+green = [0, 255, 204]  # Maplestory Flame Green in BGR colorspace
 
 @bot.event
 async def on_ready() -> None:
@@ -37,12 +40,14 @@ async def flame(interaction: discord.Interaction, equipment: discord.Attachment)
         binary_image = cv2.imread(preprocessed_images["binary"], cv2.IMREAD_GRAYSCALE)
 
         # Use pytesseract to extract text from the preprocessed image
-        custom_config = r'--psm 6 --oem 3'
-        text = pytesseract.image_to_string(binary_image, config=custom_config)
+        # custom_config = r'--psm 6 --oem 3 -c tessedit_char_whitelist=0123456789+% '
+        custom_config = r'-c tessedit_char_whitelist=0123456789+% '
+        # text = pytesseract.image_to_string(preprocessed_images["mask"], config=custom_config)
+        result = reader.readtext(preprocessed_images["mask"], detail=0, allowlist ='0123456789+%')
 
         # Send the preprocessed images and extracted text back to the user
         await interaction.response.send_message(
-            f'Used the flame command with the passed parameter: {equipment.filename}\nText found is:\n{text}')
+            f'Used the flame command with the passed parameter: {equipment.filename}\nText found is:\n{result}')
         await interaction.followup.send(files=[
             discord.File(preprocessed_images["original"], 'original_image.png'),
             discord.File(preprocessed_images["hsv"], 'hsv_image.png'),
@@ -59,7 +64,7 @@ async def flame(interaction: discord.Interaction, equipment: discord.Attachment)
         await interaction.response.send_message("The uploaded file is not a valid image.", ephemeral=True)
 
 
-def preprocess_image(image):
+def preprocess_image(image: Image):
     """
     Preprocess the image to isolate green text and visualize intermediate steps.
     """
@@ -76,11 +81,10 @@ def preprocess_image(image):
         cv2.imwrite(hsv_img_path, hsv_image)
 
     # Define the range for green color in HSV
-    lower_green = (40, 40, 0)
-    upper_green = (255, 255, 40)
+    lower_limit, upper_limit = get_limits(green)
 
     # Create a mask for green color
-    mask = cv2.inRange(hsv_image, lower_green, upper_green)
+    mask = cv2.inRange(hsv_image, lower_limit, upper_limit)
 
     # Save the mask for debugging
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
