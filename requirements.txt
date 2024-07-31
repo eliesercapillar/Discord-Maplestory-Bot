@@ -1,0 +1,8 @@
+discord.py==2.4.0
+numpy==1.24.2
+pandas==1.5.3
+python-dotenv==1.0.1
+pytesseract==0.3.10
+opencv-python==4.10.0.84
+discord~=2.3.2
+Pillow~=10.1.0

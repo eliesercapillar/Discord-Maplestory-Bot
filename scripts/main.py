@@ -12,7 +12,6 @@ from discord import app_commands
 from bot import Bot
 import tempfile
 from util import get_limits
-import easyocr
 
 load_dotenv()
 TOKEN: Final[str] = os.getenv('DISCORD_TOKEN')
@@ -20,7 +19,6 @@ pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tessera
 
 # Initialize Bot
 bot = Bot()
-reader = easyocr.Reader(['en'])
 green = [0, 255, 204]  # Maplestory Flame Green in BGR colorspace
 
 @bot.event
@@ -34,20 +32,18 @@ async def flame(interaction: discord.Interaction, equipment: discord.Attachment)
     if equipment.content_type.startswith('image/'):
         image_data = await equipment.read()
         img = Image.open(io.BytesIO(image_data))
+
+        # Preprocess the image
         preprocessed_images = preprocess_image(img)
 
-        # Load the binary image for Tesseract OCR
-        binary_image = cv2.imread(preprocessed_images["binary"], cv2.IMREAD_GRAYSCALE)
-
         # Use pytesseract to extract text from the preprocessed image
-        # custom_config = r'--psm 6 --oem 3 -c tessedit_char_whitelist=0123456789+% '
-        custom_config = r'-c tessedit_char_whitelist=0123456789+% '
-        # text = pytesseract.image_to_string(preprocessed_images["mask"], config=custom_config)
-        result = reader.readtext(preprocessed_images["mask"], detail=0, allowlist ='0123456789+%')
+        custom_config = r'--psm 6 --oem 3'
+        text = pytesseract.image_to_string(preprocessed_images["original"], lang="maple", config=custom_config)
+
 
         # Send the preprocessed images and extracted text back to the user
         await interaction.response.send_message(
-            f'Used the flame command with the passed parameter: {equipment.filename}\nText found is:\n{result}')
+            f'Used the flame command with the passed parameter: {equipment.filename}\nText found is:\n{text}')
         await interaction.followup.send(files=[
             discord.File(preprocessed_images["original"], 'original_image.png'),
             discord.File(preprocessed_images["hsv"], 'hsv_image.png'),
